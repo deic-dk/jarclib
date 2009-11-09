@@ -1,0 +1,92 @@
+Files:
+  cog-1.2.patch - contains patch for Java COG version 1.2 to make it 
+    compatible with Globus Toolkit's GridFTP protocol implementation 
+    globus_ftp_control.
+  Makefile - supported targets are all, clean and test
+
+Available functionality:
+  Job submission and control through gridftp interface
+  Discovery of clusters in MDS
+  Query and  parsing of cluster's attributes (no selection yet) 
+  
+Important:
+  It is NECESSARY to patch Java CoG. That is needed because it's
+  implementation of GridFTP protocol differs from one in Globus 
+  Toolkit (at least up to version 3.2.x), which is used in ARC.
+  More information can be found in Globus bugzilla
+  http://bugzilla.globus.org/globus/show_bug.cgi?id=1315
+  One can argue which implementation is more compatible with 
+  GridFTP RFC. But anyway Globus Toolkit is primary thing, so 
+  till people from Globus and Java CoG finally decide who is 
+  right, I suggest to patch Java CoG.
+  To do that, download Java CoG 1.2 source tarball cog-1.2-src.tar.gz
+  (e.g. http://www-unix.globus.org/cog/distribution/1.2/cog-1.2-src.tar.gz)
+  to some directory (for example this) and unpack it. 
+   tar -zxvf cog-1.2-src.tar.gz
+  Copy cog-1.2.patch to same directory (if needed) and run command
+   patch -p0 <cog-1.2.patch
+  If there are no errors continue.
+  Go to directory cog-1.2 and read file INSTALL. Follow instructions 
+  in it to build cog-jglobus.jar (it is built with command ant jar).
+  Now either install CoG as described in INSTALL or simple copy
+  cog-jglobus.jar where You already installed binary Java CoG 
+  distribution.
+  * For impatient * You can find compiled pathed cog-jglobus.jar at 
+  http://grid.uio.no/~aleks/JavaCoG/cog-jglobus.jar.
+  * Note * Patch should not destory any functionality of Java CoG.
+  Report to me if You noticed anything like that.
+  
+TESTING:
+
+source setclasspath
+make 
+make test
+
+Or you can do:
+source setclasspath
+make
+make lib
+and compile + run the following test prg in this directory
+
+import org.nordugrid.job.gridftp.ARCGridFTPJob;
+import java.util.Vector;
+import java.io.File;
+
+public class TestLib {
+    public static void main(String[] args) {
+      try {
+        ARCGridFTPJob job = new ARCGridFTPJob("gsiftp://grid.uio.no/jobs");
+        //add proxy, otherwise it uses a proxy based on cog.properties.
+        File f = new File("/tmp/proxy");
+        if (f.exists()) {
+        	job.addProxyLocation("/tmp/proxy");
+        }
+        Vector files = new Vector();
+        Vector names = new Vector();
+        files.addElement("test.txt");
+        names.addElement("test/test.dat");
+        //job.Submit("&(executable=/bin/echo)(action=request)(arguments=\"/bin/echo\" \"Test\")(join=yes)(stdout=out.txt)(outputfiles=(\"test\" \"\"))",files,names);
+        job.Submit("&(executable=/bin/echo)(action=request)(arguments=\"/bin/echo\" \"Test\")");
+        System.err.println("ID: " + job.Id());
+        System.err.println("State: " + job.State());
+        System.err.println("List");
+        files = job.List();
+        for(int i = 0;i<files.size();i++) {
+            System.err.println("File: "+(String)(files.get(i)));
+        }
+        System.err.println("Get");
+        job.Get("/tmp/"+job.Id());
+        System.err.println("Cancel");
+        job.Cancel();
+        System.err.println("Clean");
+        job.Clean();
+        System.err.println("State: " + job.State());
+        job.Disconnect();
+      } catch(java.lang.Exception err) {
+        System.err.println("Error: " + err.getMessage());
+      }
+      System.err.println("Exiting");
+    }
+}
+
+

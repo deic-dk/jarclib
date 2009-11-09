@@ -1,0 +1,369 @@
+package org.nordugrid.gridftp;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.UnsupportedEncodingException;
+import java.util.List;
+import java.util.Vector;
+import org.apache.log4j.Logger;
+import org.globus.gsi.GlobusCredential;
+import org.globus.rsl.RslNode;
+import org.globus.util.GlobusURL;
+
+public final class ARCGridFTPJob {
+
+	private static final Logger log = Logger.getLogger(ARCGridFTPJob.class);
+
+	protected ARCGridFTPJobInterface iface = null;
+
+	protected String id = null;
+
+	protected String proxylocation = null;
+
+	protected GlobusCredential globusproxy = null;
+
+	public ARCGridFTPJob(String url) throws ARCGridFTPJobException {
+		iface = new ARCGridFTPJobInterface(url);
+	}
+
+	public ARCGridFTPJob(String url, String id) throws ARCGridFTPJobException {
+		iface = new ARCGridFTPJobInterface(url);
+		this.id = new String(id);
+	}
+
+	public void addProxyLocation(String proxylocation) {
+		this.proxylocation = proxylocation;
+	}
+
+	public void addProxy(GlobusCredential globusproxy) {
+		this.globusproxy = globusproxy;
+	}
+
+	public void connect() throws ARCGridFTPJobException {
+		log.debug("Connecting to the server");
+		if (iface == null) {
+			throw new ARCGridFTPJobException("Interface is not initialised");
+		}
+		if (proxylocation != null) {
+			iface.connect(proxylocation);
+		} else if (globusproxy != null) {
+			iface.connect(globusproxy);
+		} else {
+			iface.connect();
+		}
+	}
+
+	public void disconnect() {
+		if (iface != null)
+			iface.disconnect();
+	}
+
+	public void submit(RslNode rsl) throws ARCGridFTPJobException {
+		submit(rsl.toRSL(true));
+	}
+
+	public void submit(String rsl) throws ARCGridFTPJobException {
+		if (iface == null) {
+			throw new ARCGridFTPJobException("Interface is not initialised");
+		}
+		if (id != null) {
+			throw new ARCGridFTPJobException("Job already submitted");
+		}
+		log.debug("Trying to submit: " + rsl);
+		try {
+			if (proxylocation != null)
+				id = iface.submit(proxylocation);
+
+			else if (globusproxy != null)
+				id = iface.submit(globusproxy);
+			else
+				id = iface.submit();
+			ByteArrayInputStream buffer = new ByteArrayInputStream(rsl
+					.getBytes("US-ASCII"));
+			iface.upload(buffer, id + "/new");
+		} catch (ARCGridFTPJobException err) {
+			id = null;
+			throw err;
+		} catch (UnsupportedEncodingException err) {
+			id = null;
+			throw new ARCGridFTPJobException(
+					"This implementation of Java does not support US-ASCII encoding");
+		}
+	}
+
+	public void submit(String rsl, List files, List names)
+			throws ARCGridFTPJobException {
+		if (iface == null) {
+			throw new ARCGridFTPJobException("Interface is not initialised");
+		}
+		if (id != null) {
+			throw new ARCGridFTPJobException("Job already submitted");
+		}
+		if (files.size() != names.size()) {
+			throw new ARCGridFTPJobException(
+					"Number of files does not match number of names");
+		}
+		submit(rsl);
+		// Download one by one
+		for (int i = 0; i < files.size(); i++) {
+			String file = new String((String) (files.get(i)));
+			String name = new String((String) (names.get(i)));
+			// Open local file
+			FileInputStream stream = null;
+			try {
+				stream = new FileInputStream(file);
+			} catch (FileNotFoundException err) {
+				throw new ARCGridFTPJobException("Input file " + file
+						+ " can't be open: " + err.toString());
+			}
+			name = id + "/" + name;
+			log.debug("Uploading " + file + " to " + name);
+			iface.upload(stream, name);
+		}
+	}
+
+	/**
+	 * @deprecated The gridftp based approach is unstable. Use information
+	 *             system data instead.
+	 */
+	public String state() throws ARCGridFTPJobException {
+		if (iface == null) {
+			throw new ARCGridFTPJobException("Interface is not initialised");
+		}
+		if (id == null) {
+			throw new ARCGridFTPJobException("Job is not yet submitted");
+		}
+		try {
+			ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+			iface.download(buffer, "info/" + id + "/status");
+			String state = buffer.toString("US-ASCII");
+			return state;
+		} catch (ARCGridFTPJobException err) {
+			id = null;
+			throw err;
+		} catch (java.io.UnsupportedEncodingException err) {
+			id = null;
+			throw new ARCGridFTPJobException(
+					"This implementation of Java does not support US-ASCII encoding");
+		}
+	}
+
+	public void cancel() throws ARCGridFTPJobException {
+		if (iface == null) {
+			throw new ARCGridFTPJobException("Interface is not initialised");
+		}
+		if (id == null) {
+			throw new ARCGridFTPJobException("Job is not yet submitted");
+		}
+		iface.cancel(id);
+	}
+
+	public void clean() throws ARCGridFTPJobException {
+		if (iface == null) {
+			throw new ARCGridFTPJobException("Interface is not initialised");
+		}
+		if (id == null) {
+			throw new ARCGridFTPJobException("Job is not yet submitted");
+		}
+		iface.clean(id);
+	}
+
+  public List list() throws ARCGridFTPJobException {
+    return list(false);
+  }
+  
+  public List list(boolean fullPath) throws ARCGridFTPJobException {
+		if (iface == null) {
+			throw new ARCGridFTPJobException("Interface is not initialised");
+		}
+		if (id == null) {
+			throw new ARCGridFTPJobException("Job is not yet submitted");
+		}
+		List files = new Vector();
+		List dirs = new Vector();
+		dirs.add(id);
+		for (int i = 0; i < dirs.size(); i++) {
+			String dir = new String((String) (dirs.get(i)));
+			iface.list(dir, dirs, files);
+		}
+		String start = id + "/";
+		for (int i = 0; i < files.size();) {
+			String file = (String) (files.get(i));
+			if (file.startsWith(start)) {
+        // Fix by Frederik Orellana.
+        // TODO: fullPath is a hack; should be dropped and the calling methods hamonized instead.
+        if(fullPath){
+          files.set(i, file);
+        }
+        else{
+          files.set(i, file.substring(start.length()));
+        }
+				i++;
+			} else {
+				files.remove(i);
+			}
+		}
+		return files;
+	}
+
+	public String getId() {
+		return id;
+	}
+
+	public String getGlobalId() {
+		GlobusURL url = iface.getUrl();
+		return url.getProtocol() + "://" + url.getHost() + ":" + url.getPort()
+				+ "/" + url.getPath() + "/" + id;
+	}
+
+	public List jobs() throws ARCGridFTPJobException {
+		if (iface == null) {
+			throw new ARCGridFTPJobException("Interface is not initialised");
+		}
+		Vector files = new Vector();
+		Vector dirs = new Vector();
+		iface.list("", dirs, files);
+		for (int i = 0; i < dirs.size();) {
+			if ((((String) (dirs.get(i))).equals("new"))
+					|| (((String) (dirs.get(i))).equals("/new"))
+					|| (((String) (dirs.get(i))).equals("info"))
+					|| (((String) (dirs.get(i))).equals("/info"))) {
+				dirs.remove(i);
+				continue;
+			}
+			i++;
+		}
+		return dirs;
+	}
+
+	public void get(String localDir) throws ARCGridFTPJobException {
+		if (iface == null) {
+			throw new ARCGridFTPJobException("Interface is not initialised");
+		}
+		if (id == null) {
+			throw new ARCGridFTPJobException("Job is not yet submitted");
+		}
+		// Get list of all files
+		List files = list(true);
+		File root = new File(localDir);
+		if (!root.mkdirs()) {
+			log.debug("Failed to create directory " + root);
+			// Report somehow
+		}
+		// Download one by one
+		for (int i = 0; i < files.size(); i++) {
+			String file = (String) (files.get(i));
+      System.out.println("Fetching file "+file);
+			String dir = new String();
+			int p = file.lastIndexOf('/');
+			if (p > 0)
+				dir = file.substring(0, p);
+			dir = localDir + "/" + dir;
+			file = localDir + "/" + file;
+			// Create local directory
+			File localFile = new File(dir);
+      // Fix by Frederik Orellana
+			if (!localFile.exists() && !localFile.mkdirs()) {
+        System.err.println("Failed to create directory " + dir);
+				// Report somehow
+				continue;
+			}
+			// Open local file
+			FileOutputStream stream = null;
+			try {
+				stream = new FileOutputStream(file);
+			} catch (FileNotFoundException err) {
+				if (log.isDebugEnabled()) {
+        err.printStackTrace();
+					log.debug("Writing file " + file);
+				}
+				// Report somehow
+				continue;
+			}
+			// Transfer data
+			try {
+				System.err.println("Downloading " + (String) (files.get(i))
+						+ " to " + file);
+				iface.download(stream, (String) (files.get(i)));
+			} catch (ARCGridFTPJobException err) {
+				// Report somehow
+				continue;
+			}
+		}
+
+	}
+
+	public void getLog(FileOutputStream stream) throws ARCGridFTPJobException {
+		if (iface == null) {
+			throw new ARCGridFTPJobException("Interface is not initialised");
+		}
+		if (id == null) {
+			throw new ARCGridFTPJobException("Job is not yet submitted");
+		}
+		iface.download(stream, "info/" + id + "/errors");
+	}
+
+	/**
+	 * Method added by Frederik Orellana
+	 */
+	public void getOutputFile(String file, String localDir)
+			throws ARCGridFTPJobException {
+		if (iface == null) {
+			throw new ARCGridFTPJobException("Interface is not initialised");
+		}
+		if (id == null) {
+			throw new ARCGridFTPJobException("Job is not yet submitted");
+		}
+		String localFile = file;
+		int p = localFile.lastIndexOf('/');
+		if (p > -1)
+			localFile = localFile.substring(p + 1);
+		String fullLocalFile = localDir + "/" + localFile;
+		// Create local directory
+		if (!(new File(localDir)).mkdirs()) {
+			log.debug("Failed to create directory " + localDir);
+			// Report somehow
+		}
+		// Open local file
+		FileOutputStream stream = null;
+		try {
+			stream = new FileOutputStream(fullLocalFile);
+		} catch (FileNotFoundException err) {
+			if (log.isDebugEnabled()) {
+				err.printStackTrace();
+				log.debug("Writing file " + file);
+			}
+			// Report somehow
+		}
+		iface.download(stream, id + "/" + file);
+	}
+
+	/**
+	 * Method added by Frederik Orellana
+	 */
+	public String getOutputFile(String file) throws ARCGridFTPJobException {
+		if (iface == null) {
+			throw new ARCGridFTPJobException("Interface is not initialised");
+		}
+		if (id == null) {
+			throw new ARCGridFTPJobException("Job is not yet submitted");
+		}
+		try {
+			ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+			iface.download(buffer, id + "/" + file);
+			String state = buffer.toString("US-ASCII");
+			return state;
+		} catch (ARCGridFTPJobException err) {
+			id = null;
+			throw err;
+		} catch (java.io.UnsupportedEncodingException err) {
+			id = null;
+			throw new ARCGridFTPJobException(
+					"This implementation of Java does not support US-ASCII encoding");
+		}
+	}
+}

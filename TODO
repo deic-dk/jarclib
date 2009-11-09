@@ -1,0 +1,9 @@
+0. Write documentation.
+
+1. Fix the resource suitability test in the JobUtilities. Currently doesn't check for all the attributes. Also, some 
+heuristics can be added for the properties that cannot be directly taken from the LDAP (say, disk space - 
+it can change by the time the job actualy starts running). (DONE - changed to Matcher interface + Impl.)
+
+2. Extract connection and LDAP operation timeouts to the API (?).
+
+3. Add log4j.property file :)

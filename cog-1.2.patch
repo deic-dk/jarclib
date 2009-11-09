@@ -1,0 +1,88 @@
+diff -ru cog-1.2.orig/src/org/globus/ftp/extended/GridFTPControlChannel.java cog-1.2/src/org/globus/ftp/extended/GridFTPControlChannel.java
+--- cog-1.2.orig/src/org/globus/ftp/extended/GridFTPControlChannel.java	Tue Jun 15 07:37:42 2004
++++ cog-1.2/src/org/globus/ftp/extended/GridFTPControlChannel.java	Sat Nov 27 14:49:28 2004
+@@ -162,6 +162,13 @@
+ 	Reply reply1 = null;
+ 	try {
+ 	    reply1    = read();
++	    // enter secure mode - send MIC commands
++	    setInputStream(gssin);
++	    setOutputStream(gssout);
++        if(reply1.getCode() == 632) {
++            gssin.processMsg(reply1.toString());
++	        reply1    = read();
++        }
+ 	} catch (FTPReplyParseException rpe) {
+ 	    throw ServerException.embedFTPReplyParseException(
+ 				      rpe,
+@@ -172,13 +179,9 @@
+ 	if ( ! Reply.isPositiveCompletion(reply1)) {
+ 	    close();
+ 	    throw ServerException.embedUnexpectedReplyCodeException(
+-				    new UnexpectedReplyCodeException(reply1),
+-				    "GSSAPI authentication failed.");
+-	}
+-	
+-	// enter secure mode - send MIC commands
+-	setInputStream(gssin);
+-	setOutputStream(gssout);
++		  		    new UnexpectedReplyCodeException(reply1),
++		  		    "GSSAPI authentication failed.");
++    }
+ 	//from now on, the commands and replies
+ 	//are protected and pass through gsi wrapped socket
+ 
+diff -ru cog-1.2.orig/src/org/globus/ftp/extended/GridFTPInputStream.java cog-1.2/src/org/globus/ftp/extended/GridFTPInputStream.java
+--- cog-1.2.orig/src/org/globus/ftp/extended/GridFTPInputStream.java	Mon Nov 10 05:30:26 2003
++++ cog-1.2/src/org/globus/ftp/extended/GridFTPInputStream.java	Sat Nov 27 14:46:28 2004
+@@ -120,4 +120,35 @@
+ 	 
+     }
+ 
++
++    void processMsg(String line) throws IOException {
++      if (line == null) {
++        throw new EOFException();
++      }
++
++      if (line.charAt(0) == '6') {
++        this.buff = unwrap(Base64.decode(line.substring(4).getBytes()));
++        this.index = 0;
++
++        /**
++         * This is a fix for messages that are not
++         * \r\n terminated
++         */
++        byte last = this.buff[this.buff.length-1];
++        if (last == 0) {
++          // this is a bug in older gridftp servers
++          // line should be terminated with \r\n0
++          if (this.buff[this.buff.length-2] != 10) {
++            this.buff[this.buff.length-1] = 10;
++          }
++        } else if (last != 10) {
++          byte [] newBuff = new byte[this.buff.length+1];
++          System.arraycopy(buff, 0, newBuff, 0, this.buff.length);
++          newBuff[this.buff.length]=10;
++          this.buff = newBuff;
++        }
++      } else {
++        throw new IOException(line);
++      }
++    }
+ }
+diff -ru cog-1.2.orig/src/org/globus/ftp/vanilla/TransferMonitor.java cog-1.2/src/org/globus/ftp/vanilla/TransferMonitor.java
+--- cog-1.2.orig/src/org/globus/ftp/vanilla/TransferMonitor.java	Mon Jun 14 01:09:21 2004
++++ cog-1.2/src/org/globus/ftp/vanilla/TransferMonitor.java	Sun Nov 28 22:29:27 2004
+@@ -141,8 +141,9 @@
+ 			continue;
+ 		    }
+ 		    
+-		    //226 Transfer complete
+-		    if (nextReply.getCode() == 226) {
++		    //226,250 Transfer complete
++		    if ((nextReply.getCode() == 226) || 
++                        (nextReply.getCode() == 250)) {
+ 			abortable = false;
+ 			logger.debug("transfer complete: " + nextReply.toString());
+ 			break;
